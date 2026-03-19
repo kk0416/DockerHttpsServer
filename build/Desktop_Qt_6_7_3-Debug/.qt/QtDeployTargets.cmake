@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_DockerRoboshopServer_FILE /home/hannah-seer/公共的/docker/DockerRoboshopServer/build/Desktop_Qt_6_7_3-Debug/DockerRoboshopServer)
+set(__QT_DEPLOY_TARGET_DockerRoboshopServer_TYPE EXECUTABLE)

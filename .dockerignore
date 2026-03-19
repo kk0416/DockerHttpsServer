@@ -1,0 +1,17 @@
+.git
+.gitignore
+build
+build-*
+cmake-build-*
+out
+dist
+*.obj
+*.o
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.dll
+*.exe
+*.user
+*.log

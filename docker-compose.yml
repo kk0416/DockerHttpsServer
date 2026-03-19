@@ -1,0 +1,15 @@
+services:
+  docker-roboshop-server:
+    build: .
+    image: docker-roboshop-server:1.0.0
+    container_name: docker-roboshop-server
+    ports:
+      - "8443:8443"
+    environment:
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8443"
+      SERVER_MAX_PENDING: "4096"
+      SERVER_LISTEN_BACKLOG: "8192"
+      SERVER_MAX_ACTIVE: "12000"
+      SSL_CERT_FILE: "/app/certs/server.crt"
+      SSL_KEY_FILE: "/app/certs/server.key"
