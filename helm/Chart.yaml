@@ -1,0 +1,12 @@
+apiVersion: v2
+name: sep-rbs-server
+description: DockerRoboshopServer Helm Chart（华为云 CCE / Kubernetes 部署）
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - qt
+  - https
+  - robot
+  - server
+  - cce

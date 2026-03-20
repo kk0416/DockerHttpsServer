@@ -1,0 +1,125 @@
+# ============================================================
+# sep-rbs-server - Helm values
+# 说明:
+# 1. ingress.publicUrl 接收完整 URL。
+# 2. Ingress spec.rules.host 会自动提取其中的 hostname 部分。
+# ============================================================
+
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # SWR 格式: swr.<region>.myhuaweicloud.com/<organization>/<image>
+  repository: swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 8443
+  targetPort: 8443
+  sessionAffinity: None
+
+server:
+  host: 0.0.0.0
+  port: 8443
+  maxPending: 4096
+  listenBacklog: 8192
+  maxActive: 12000
+
+tls:
+  certFile: /app/certs/server.crt
+  keyFile: /app/certs/server.key
+  existingSecret: ""
+  secretKeys:
+    cert: server.crt
+    key: server.key
+
+ingress:
+  enabled: true
+  className: "cce"
+  publicUrl: "http://sep-rbs-server.cloud-data-dev.seer-group.com/"
+  annotations:
+    kubernetes.io/ingress.class: cce
+    kubernetes.io/elb.class: performance
+    kubernetes.io/elb.port: "80"
+    kubernetes.io/elb.lb-algorithm: ROUND_ROBIN
+    kubernetes.io/elb.keepalive-timeout: "300"
+    kubernetes.io/elb.idle-timeout: "300"
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  paths:
+    - path: /
+      pathType: Prefix
+  tls: []
+    # - secretName: roboshop-server-ingress-tls
+    #   hosts:
+    #     - sep-rbs-server.cloud-data-dev.seer-group.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior: {}
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+podAnnotations: {}
+podSecurityContext: {}
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+probes:
+  startup:
+    scheme: HTTPS
+    path: /health
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30
+  liveness:
+    scheme: HTTPS
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    scheme: HTTPS
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+extraEnv: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
