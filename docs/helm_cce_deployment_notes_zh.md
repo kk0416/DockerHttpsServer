@@ -21,6 +21,8 @@
 - Service 名称：`sep-rbs-server-v1`
 - Ingress 类型：`cce`
 - Ingress 绑定 ELB：`32bb8857-86a4-475b-b80a-f650ab200a8a`
+- Ingress 内网地址：`192.168.0.154`
+- 域名当前解析到的公网 IPv4：`124.71.231.189`
 - Ingress TLS Secret：`sep-rbs-server-ingress-tls`
 - Image Pull Secret：`default-secret`
 
@@ -35,6 +37,17 @@ curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
 ```json
 {"service":"DockerRoboshopServer","status":"ok","timeUtc":"2026-03-20T06:59:44Z"}
 ```
+
+通过公网 IP + Host 头测试的命令：
+
+```powershell
+curl.exe -vk https://124.71.231.189:443/health -H "Host: sep-rbs-server.cloud-data-dev.seer-group.com"
+```
+
+测试结果：
+
+- 返回 `200 OK`
+- 说明共享 ELB 可以通过 Host 规则将请求转发到当前服务
 
 ## 3. 本次部署中遇到的问题与解决办法
 
@@ -356,6 +369,266 @@ curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
 curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/
 ```
 
+如果需要绕过 DNS，直接验证公网 ELB IP 是否可转发到服务，可使用：
+
+```powershell
+curl.exe -vk https://124.71.231.189:443/health -H "Host: sep-rbs-server.cloud-data-dev.seer-group.com"
+curl.exe -vk https://124.71.231.189:443/api/version -H "Host: sep-rbs-server.cloud-data-dev.seer-group.com"
+```
+
+说明：
+
+- 由于 Ingress 规则是按 `host` 匹配的，因此直接裸访问 `https://124.71.231.189:443` 并不可靠。
+- 如果使用公网 IP 进行测试，应显式带上 `Host: sep-rbs-server.cloud-data-dev.seer-group.com` 请求头。
+- 对外正式使用时，仍然建议统一通过域名访问，而不是通过公网 IP 访问。
+
+### 5.6 代码修改后的更新与重新部署流程
+
+后续日常发版建议固定按下面流程执行，重点是：
+
+- 镜像标签不要复用，建议每次发版都递增，例如：`1.0.1`、`1.0.2`
+- 如果只改了业务代码，没有改 Helm 模板，通常只需要更新镜像并执行 `helm upgrade`
+- 如果改了 `helm/` 下的模板或默认值，除了升级，还应重新打包 chart
+
+#### 5.6.1 只修改代码，未修改 Helm 配置
+
+1. 本地完成代码修改并构建
+2. 构建新镜像
+3. 推送到华为云 SWR
+4. 使用新镜像标签执行 Helm 升级
+5. 检查 Pod 滚动状态并做接口验证
+
+示例命令：
+
+```powershell
+$tag = "1.0.1"
+
+docker build -t sep-rbs-server:$tag .
+docker tag sep-rbs-server:$tag swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server:$tag
+docker push swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server:$tag
+
+helm upgrade --install sep-rbs-server-v1 .\helm `
+  -n roboshop `
+  --create-namespace `
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server `
+  --set image.tag=$tag
+
+kubectl rollout status deployment/sep-rbs-server-v1 -n roboshop
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/api/version
+```
+
+#### 5.6.2 同时修改了 Helm 配置
+
+如果修改了下面这些内容，就属于 Helm 配置变更：
+
+- `helm/values.yaml`
+- `helm/values-production.yaml`
+- `helm/templates/*.yaml`
+- `helm/Chart.yaml`
+
+建议流程：
+
+1. 先本地渲染或检查 chart
+2. 重新打包新的 chart
+3. 再执行升级
+4. 如果要上传华为云模板市场，使用新的 `.tgz` 文件
+
+示例命令：
+
+```powershell
+$tag = "1.0.1"
+$chartVersion = "1.0.1"
+
+helm lint .\helm
+helm template sep-rbs-server-v1 .\helm -n roboshop > .\helm-rendered.yaml
+
+docker build -t sep-rbs-server:$tag .
+docker tag sep-rbs-server:$tag swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server:$tag
+docker push swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server:$tag
+
+helm package .\helm `
+  --version $chartVersion `
+  --app-version $tag `
+  -d .
+
+helm upgrade --install sep-rbs-server-v1 .\sep-rbs-server-$chartVersion.tgz `
+  -n roboshop `
+  --create-namespace `
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/seer_develop/sep-rbs-server `
+  --set image.tag=$tag
+```
+
+说明：
+
+- `image.tag` 用于控制容器镜像版本
+- `Chart.yaml` 的 `version` 用于 chart 包版本
+- 如果只是代码更新，不一定要同步修改 chart 版本
+- 如果要重新上传 `.tgz` 到平台，建议同步提升 chart 版本，避免覆盖混淆
+
+#### 5.6.3 部署后的最小检查项
+
+```powershell
+helm list -n roboshop
+helm history sep-rbs-server-v1 -n roboshop
+kubectl get pods -n roboshop -o wide
+kubectl get svc -n roboshop
+kubectl get ingress -n roboshop
+kubectl rollout status deployment/sep-rbs-server-v1 -n roboshop
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/api/version
+```
+
+建议至少确认：
+
+- 新 Pod 已经替换旧 Pod
+- `READY` 正常
+- Ingress 规则没有被改坏
+- `/health` 返回 `200`
+- `/api/version` 返回的版本信息符合预期
+
+#### 5.6.4 回滚流程
+
+如果升级后发现异常，可以直接回滚到上一版：
+
+```powershell
+helm history sep-rbs-server-v1 -n roboshop
+helm rollback sep-rbs-server-v1 1 -n roboshop
+kubectl rollout status deployment/sep-rbs-server-v1 -n roboshop
+```
+
+说明：
+
+- `1` 只是示例 revision，实际回滚时请先看 `helm history`
+- 如果只是镜像版本有问题，回滚 Helm release 通常是最快的恢复方式
+- 回滚后仍建议再次执行 `/health` 与 `/api/version` 验证
+
+### 5.7 证书 / 密钥更换流程
+
+当前部署里有两套 TLS 配置，替换时不要混淆：
+
+- Ingress 前端证书：浏览器访问 `https://sep-rbs-server.cloud-data-dev.seer-group.com/` 时看到的证书
+- 后端服务证书：Pod 内部应用监听 `8443` 时使用的 `server.crt` / `server.key`
+
+当前默认情况：
+
+- Ingress 前端证书 Secret：`sep-rbs-server-ingress-tls`
+- 后端服务证书 Secret：默认未启用 `tls.existingSecret`
+
+#### 5.7.1 更换 Ingress 前端证书，但 Secret 名不变
+
+这是最简单、最推荐的做法。
+
+如果仍然使用 `sep-rbs-server-ingress-tls` 这个名字，通常不需要修改 Helm 配置，只需要覆盖 Secret 内容：
+
+```powershell
+kubectl create secret tls sep-rbs-server-ingress-tls `
+  --cert=.\new\tls.crt `
+  --key=.\new\tls.key `
+  -n roboshop `
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+说明：
+
+- `tls.crt` 和 `tls.key` 必须是一对
+- 证书里的域名应包含 `sep-rbs-server.cloud-data-dev.seer-group.com`
+- 这种方式不改 Secret 名，因此 Helm values 一般不用修改
+
+更换后建议验证：
+
+```powershell
+kubectl get secret sep-rbs-server-ingress-tls -n roboshop
+kubectl describe ingress sep-rbs-server-v1 -n roboshop
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
+```
+
+#### 5.7.2 更换 Ingress 前端证书，并改成新的 Secret 名
+
+如果你想把 Secret 名从 `sep-rbs-server-ingress-tls` 改成其他名字，例如 `sep-rbs-server-ingress-tls-v2`，则需要两步：
+
+1. 先创建新的 TLS Secret
+2. 再修改 Helm 配置中的 `ingress.tls[].secretName`
+
+创建新 Secret：
+
+```powershell
+kubectl create secret tls sep-rbs-server-ingress-tls-v2 `
+  --cert=.\new\tls.crt `
+  --key=.\new\tls.key `
+  -n roboshop
+```
+
+临时修改方式：
+
+```powershell
+helm upgrade --install sep-rbs-server-v1 .\sep-rbs-server-1.0.0.tgz `
+  -n roboshop `
+  --set ingress.tls[0].secretName=sep-rbs-server-ingress-tls-v2
+```
+
+长期修改方式：
+
+- 修改 [helm/values.yaml](/D:/docker-images/DockerRoboshopServer/DockerRoboshopServer/helm/values.yaml)
+- 修改 [helm/values-production.yaml](/D:/docker-images/DockerRoboshopServer/DockerRoboshopServer/helm/values-production.yaml)
+- 如果你是通过 `.tgz` 包部署，还需要重新执行 `helm package`
+
+#### 5.7.3 更换后端服务证书
+
+如果要替换 Pod 内部应用使用的 `server.crt` / `server.key`，需要启用 `tls.existingSecret`。
+
+先创建或更新后端证书 Secret：
+
+```powershell
+kubectl create secret generic sep-rbs-server-backend-tls `
+  --from-file=server.crt=.\server.crt `
+  --from-file=server.key=.\server.key `
+  -n roboshop `
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+然后执行 Helm 升级：
+
+```powershell
+helm upgrade --install sep-rbs-server-v1 .\sep-rbs-server-1.0.0.tgz `
+  -n roboshop `
+  --set tls.existingSecret=sep-rbs-server-backend-tls
+```
+
+如果 Secret 中的键名不是 `server.crt` 和 `server.key`，还要补充：
+
+```powershell
+helm upgrade --install sep-rbs-server-v1 .\sep-rbs-server-1.0.0.tgz `
+  -n roboshop `
+  --set tls.existingSecret=sep-rbs-server-backend-tls `
+  --set tls.secretKeys.cert=<你的crt键名> `
+  --set tls.secretKeys.key=<你的key键名>
+```
+
+说明：
+
+- 当前模板会把该 Secret 挂载到容器内 `/app/certs`
+- 对应逻辑见 [helm/templates/deployment.yaml](/D:/docker-images/DockerRoboshopServer/DockerRoboshopServer/helm/templates/deployment.yaml)
+- 容器环境变量中的证书路径默认是 `/app/certs/server.crt` 和 `/app/certs/server.key`
+
+#### 5.7.4 更换完成后的建议检查项
+
+```powershell
+kubectl get secret -n roboshop
+kubectl get pods -n roboshop
+kubectl rollout status deployment/sep-rbs-server-v1 -n roboshop
+kubectl describe ingress sep-rbs-server-v1 -n roboshop
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/health
+curl.exe -vk https://sep-rbs-server.cloud-data-dev.seer-group.com/api/version
+```
+
+建议重点确认：
+
+- Ingress 使用的 Secret 名是否正确
+- Pod 是否已经完成滚动更新
+- 服务是否仍然返回 `200`
+- 浏览器或 `curl` 返回的证书是否已经是新证书
+
 ## 6. 以后还需要做的事情
 
 ### 6.1 替换自签名证书
@@ -388,7 +661,7 @@ kubernetes.io/elb.id: "32bb8857-86a4-475b-b80a-f650ab200a8a"
 
 ### 6.3 补充 CI 检查
 
-当前环境没有 `helm` 命令，因此未执行 `helm lint`。
+当前已经可以在发布机器上执行 `helm upgrade --install`，但尚未把 `helm lint` 与 `helm template` 纳入自动化校验。
 
 后续建议：
 

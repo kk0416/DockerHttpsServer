@@ -1,2 +1,7 @@
 *.tar
 *.tar.gz
+/*.crt
+/*.key
+/certs/*.gitkeep
+/certs/*.crt
+/certs/*.key
