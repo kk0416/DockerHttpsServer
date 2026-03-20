@@ -14,14 +14,21 @@ imagePullSecrets:
 ingress:
   enabled: true
   className: "cce"
-  publicUrl: "http://sep-rbs-server.cloud-data-dev.seer-group.com/"
+  publicUrl: "https://sep-rbs-server.cloud-data-dev.seer-group.com/"
   annotations:
     kubernetes.io/ingress.class: cce
     kubernetes.io/elb.class: performance
-    kubernetes.io/elb.port: "80"
+    kubernetes.io/elb.id: "32bb8857-86a4-475b-b80a-f650ab200a8a"
+    kubernetes.io/elb.port: "443"
+    kubernetes.io/elb.pool-protocol: "https"
     kubernetes.io/elb.lb-algorithm: ROUND_ROBIN
-    kubernetes.io/elb.keepalive-timeout: "300"
-    kubernetes.io/elb.idle-timeout: "300"
+    kubernetes.io/elb.client_timeout: "300"
+    kubernetes.io/elb.member_timeout: "300"
+    kubernetes.io/elb.keepalive_timeout: "300"
+  tls:
+    - secretName: sep-rbs-server-ingress-tls
+      hosts:
+        - sep-rbs-server.cloud-data-dev.seer-group.com
 
 resources:
   requests:

@@ -23,6 +23,11 @@ Qt 6.7.x + MSVC2019 compatible HTTPS server project.
 |-- CMakePresets.json
 |-- Dockerfile
 |-- docker-compose.yml
+|-- helm/
+|   |-- Chart.yaml
+|   |-- values.yaml
+|   |-- values-production.yaml
+|   `-- templates/
 |-- src/
 |   |-- main.cpp
 |   |-- HttpsServer.h
@@ -144,6 +149,83 @@ docker run -d --name docker-roboshop-server \
   -v /opt/certs:/app/certs:ro \
   swr.cn-north-4.myhuaweicloud.com/<namespace>/docker-roboshop-server:1.0.0
 ```
+
+## Deploy to Kubernetes With Helm
+
+The repository now contains a Helm chart in `helm/`.
+
+### 1) Default chart behavior
+
+- Default external URL: `https://sep-rbs-server.cloud-data-dev.seer-group.com/`
+- `values.yaml` uses `ingress.publicUrl` as a full URL.
+- The template automatically extracts the hostname part and writes it into `Ingress.spec.rules.host`.
+- Container probes use `HTTPS` and check `/health`.
+- The application listens on container port `8443`.
+
+### 2) Install with default values
+
+```bash
+helm install roboshop-server ./helm
+```
+
+### 3) Install with SWR image
+
+```bash
+helm install roboshop-server ./helm \
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/<namespace>/sep-rbs-server \
+  --set image.tag=1.0.0
+```
+
+### 4) Mount backend server certificate from Kubernetes Secret
+
+The server itself is an HTTPS service, so in Kubernetes you should provide a Secret containing:
+
+- `server.crt`
+- `server.key`
+
+Example:
+
+```bash
+kubectl create secret generic roboshop-server-tls \
+  --from-file=server.crt=/path/to/server.crt \
+  --from-file=server.key=/path/to/server.key
+```
+
+Then install with:
+
+```bash
+helm install roboshop-server ./helm \
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/<namespace>/sep-rbs-server \
+  --set image.tag=1.0.0 \
+  --set tls.existingSecret=roboshop-server-tls
+```
+
+### 5) Production values
+
+```bash
+helm install roboshop-server ./helm -f helm/values-production.yaml \
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/<namespace>/sep-rbs-server \
+  --set image.tag=1.0.0
+```
+
+Or upgrade:
+
+```bash
+helm upgrade --install roboshop-server ./helm -f helm/values-production.yaml \
+  --set image.repository=swr.cn-north-4.myhuaweicloud.com/<namespace>/sep-rbs-server \
+  --set image.tag=1.0.0
+```
+
+### 6) Ingress notes
+
+- The chart now defaults to CCE HTTPS ingress on port `443` and forwards to the backend using `kubernetes.io/elb.pool-protocol: https`.
+- The chart now defaults `service.type` to `NodePort`, which matches the common CCE LoadBalancer Ingress requirement.
+- Access the public entry with `https://sep-rbs-server.cloud-data-dev.seer-group.com/`, not `http://...`.
+- If you expose HTTPS at the ingress layer, configure `ingress.tls` or the corresponding ELB certificate settings before expecting external access to work.
+- If your ingress controller talks to the backend over HTTPS, keep the Service port as `8443`.
+- If you are in a CCE Turbo passthrough scenario that requires `ClusterIP`, override `service.type` explicitly.
+- If your ingress controller requires an explicit backend protocol annotation, add the controller-specific annotation in `helm/values.yaml`.
+- The chart default keeps the public access URL as `https://sep-rbs-server.cloud-data-dev.seer-group.com/`, and the Pod still serves HTTPS internally on port `8443`.
 
 ## Notes
 
